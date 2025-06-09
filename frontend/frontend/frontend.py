@@ -8,10 +8,12 @@ class State(rx.State):
     customers: List[Dict] = []
     companies: List[str] = ["전체"]
     upload_result: str = ""
+    preview_url: str = ""
 
     async def set_filter_company(self, company: str):
         self.filter_company = company
         await self.get_customers()
+
 
     async def get_customers(self):
         url = "http://localhost:8000/api/business-card/list/"
@@ -35,6 +37,12 @@ class State(rx.State):
             return
         file = files[0]
         upload_data = await file.read()
+
+        import base64
+        encoded = base64.b64encode(upload_data).decode("utf-8")
+        mime = file.content_type
+        self.preview_url = f"data:{mime};base64,{encoded}"
+
         url = "http://localhost:8000/api/business-card/"
         files_data = {'image': (file.filename, upload_data, file.content_type)}
         async with httpx.AsyncClient() as client:
@@ -95,19 +103,33 @@ def upload_page():
         rx.vstack(
             rx.heading("📤 명함 업로드", size="6", color="#234e52"),
             rx.upload(
-                rx.vstack(
-                    rx.icon("upload", size=32, color="#2c7a7b"),
-                    rx.text("명함 이미지를 선택하거나 드래그하세요", font_weight="semibold", color="#2c7a7b")
+                # rx.vstack(
+                #     rx.icon("upload", size=32, color="#2c7a7b"),
+                #     rx.text("명함 이미지를 선택하거나 드래그하세요", font_weight="semibold", color="#2c7a7b")
+                # ),
+                rx.cond(
+                  State.preview_url == "",
+                  rx.vstack(
+                      rx.icon("upload", size=32, color="#2c7a7b"),
+                      rx.text("명함 이미지를 선택하거나 드래그하세요", font_weight="semibold", color="#2c7a7b")
+                  )
                 ),
                 id=upload_id,
                 multiple=False,
                 accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"]},
                 max_files=1,
+                min_height="186px",
+                min_width="404px",
                 border="3px dashed #2c7a7b",
                 padding="56px",
                 border_radius="20px",
                 margin_bottom="24px",
-                background="#ebf8ff"
+                # background를 상태에 따라 동적으로 변경
+                background=rx.cond(
+                    State.preview_url != "",
+                    "url({}) center/cover no-repeat".format(State.preview_url),
+                    "#ebf8ff"
+                ),
             ),
             rx.button(
                 "업로드",
@@ -174,6 +196,20 @@ def dashboard_page():
 
     return rx.center(
         rx.vstack(
+             rx.hstack(
+                rx.link(
+                    rx.button("🏠 메인 페이지", color_scheme="gray", variant="ghost"),
+                    href="/"
+                ),
+                rx.link(
+                    rx.button("📤 업로드", color_scheme="gray", variant="ghost"),
+                    href="/upload"
+                ),
+                spacing="4",
+                justify="end",
+                width="100%",
+                padding_bottom="12px"
+            ),
             rx.heading("📊 대시보드", size="6", color="#ffffff"),
             rx.select(
                 items=State.companies,
