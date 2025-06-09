@@ -20,7 +20,8 @@ class State(rx.State):
         params = {}
         if self.filter_company != "전체":
             params["company"] = self.filter_company
-        async with httpx.AsyncClient() as client:
+        # async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, params=params)
         if response.status_code == 200:
             self.customers = response.json()
@@ -45,7 +46,8 @@ class State(rx.State):
 
         url = "http://localhost:8000/api/business-card/"
         files_data = {'image': (file.filename, upload_data, file.content_type)}
-        async with httpx.AsyncClient() as client:
+        # async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, files=files_data)
         if response.status_code == 201:
             self.upload_result = f"{file.filename} 업로드 및 저장 성공!"
@@ -56,11 +58,17 @@ class State(rx.State):
     @rx.event
     async def delete_customer(self, customer_id: str):
         url = f"http://localhost:8000/api/business-card/{customer_id}/"
-        async with httpx.AsyncClient() as client:
+        # async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.delete(url)
         if response.status_code == 204:
             # 삭제 성공 시 목록 갱신
             await self.get_customers()
+
+    @rx.event
+    async def reset_upload_state(self):
+        self.preview_url = ""
+        self.upload_result = ""
 
 # 2. 메인 페이지
 def main_page():
@@ -97,10 +105,25 @@ def main_page():
     )
 
 # 3. 업로드 페이지
+@rx.page(route="/upload", on_load=State.reset_upload_state)
 def upload_page():
     upload_id = "upload1"
     return rx.center(
         rx.vstack(
+             rx.hstack(
+                rx.link(
+                    rx.button("🏠 메인 페이지", color_scheme="gray", variant="ghost"),
+                    href="/"
+                ),
+                rx.link(
+                    rx.button("📊 대시보드", color_scheme="gray", variant="ghost"),
+                    href="/dashboard"
+                ),
+                spacing="4",
+                justify="end",
+                width="100%",
+                padding_bottom="12px"
+            ),
             rx.heading("📤 명함 업로드", size="6", color="#234e52"),
             rx.upload(
                 # rx.vstack(
@@ -111,7 +134,7 @@ def upload_page():
                   State.preview_url == "",
                   rx.vstack(
                       rx.icon("upload", size=32, color="#2c7a7b"),
-                      rx.text("명함 이미지를 선택하거나 드래그하세요", font_weight="semibold", color="#2c7a7b")
+                      rx.text("더블클릭후, 명함이미지를 선택해주세요.", font_weight="semibold", color="#2c7a7b")
                   )
                 ),
                 id=upload_id,
@@ -139,6 +162,16 @@ def upload_page():
                 width="100%",
                 border_radius="full",
                 box_shadow="lg"
+            ),
+            rx.cond(
+                State.preview_url != "",
+                rx.button(
+                    "🗑️ 이미지 삭제",
+                    on_click=State.reset_upload_state,
+                    color_scheme="red",
+                    variant="ghost",
+                    margin_top="8px"
+                )
             ),
             rx.cond(
                 State.upload_result != "",
