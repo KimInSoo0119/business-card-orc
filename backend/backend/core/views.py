@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import insert_customer, get_customers, delete_customer
 from bson import ObjectId
-from .ocr import extract_text_from_image
+from .ocr import process_business_card
+import tempfile
 
 class BusinessCardUploadView(APIView):
     parser_classes = [MultiPartParser]
@@ -14,10 +15,18 @@ class BusinessCardUploadView(APIView):
         if not image_file:
             return Response({'error': '이미지 파일이 필요합니다.'}, status=status.HTTP_400_BAD_REQUEST)
         # 1. OCR로 텍스트 추출 (bytes로 변환)
-        image_file.seek(0)
-        text = extract_text_from_image(image_file.read())
+        # image_file.seek(0)
+        # text = process_business_card(image_file.read())
+         # 1. 임시 파일에 저장
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+            for chunk in image_file.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+        # 2. OCR로 텍스트 추출 (경로 전달)
+        customer_data = process_business_card(tmp_path)
         # 2. 정보 파싱
-        customer_data = self.parse_ocr_text(text)
+        # customer_data = self.parse_ocr_text(text)
+        # customer_data = self.parse_ocr_text(text['text'])
         # 3. 암호화/복호화 없이 바로 저장
         inserted = insert_customer(customer_data)
         # 4. ObjectId를 문자열로 변환해서 응답에 포함
@@ -61,4 +70,8 @@ class CustomerDeleteView(APIView):
             return Response({'message': '삭제 성공'}, status=status.HTTP_204_NO_CONTENT)
         else:
             return Response({'error': '해당 고객을 찾을 수 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+
 

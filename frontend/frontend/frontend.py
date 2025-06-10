@@ -1,6 +1,6 @@
 import reflex as rx
 import httpx
-from typing import List, Dict
+from typing import List, Dict, Any
 
 # 1. 상태 클래스
 class State(rx.State):
@@ -9,6 +9,10 @@ class State(rx.State):
     companies: List[str] = ["전체"]
     upload_result: str = ""
     preview_url: str = ""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        object.__setattr__(self, "_upload_files", None)
 
     async def set_filter_company(self, company: str):
         self.filter_company = company
@@ -32,28 +36,57 @@ class State(rx.State):
             self.companies = ["전체"]
 
     @rx.event
-    async def handle_upload(self, files: List[rx.UploadFile]):
+    async def handle_drop(self, files: Any):
         if not files:
-            self.upload_result = "파일이 선택되지 않았습니다."
+            self.upload_result = "파일을 선택해주세요."
             return
+
+        object.__setattr__(self, "_upload_files", files)
         file = files[0]
-        upload_data = await file.read()
+        if hasattr(file, "read"):
+            # UploadFile 인 경우
+            update_file = await file.read()
+            mime = getattr(file, "content_type", "application/octet-stream")
+        else:
+            # 이미 bytes 인 경우
+            update_file = file
+            mime = "application/octet-stream"  # fallback → 필요시 추정 가능
 
         import base64
-        encoded = base64.b64encode(upload_data).decode("utf-8")
-        mime = file.content_type
+        encoded = base64.b64encode(update_file).decode("utf-8")
         self.preview_url = f"data:{mime};base64,{encoded}"
 
-        url = "http://localhost:8000/api/business-card/"
-        files_data = {'image': (file.filename, upload_data, file.content_type)}
-        # async with httpx.AsyncClient() as client:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, files=files_data)
-        if response.status_code == 201:
-            self.upload_result = f"{file.filename} 업로드 및 저장 성공!"
-            await self.get_customers()
-        else:
-            self.upload_result = f"업로드 실패!"
+    @rx.event
+    async def handle_upload(self):
+        upload_files = getattr(self, "_upload_files", None)
+        if not upload_files:
+            self.upload_result = "파일이 선택되지 않았습니다."
+            return
+        file = upload_files[0]
+        try:
+            if hasattr(file, "read"):
+                upload_data = await file.read()
+                filename = getattr(file, "filename", "uploaded_file")
+                content_type = getattr(file, "content_type", "application/octet-stream")
+            else:
+                upload_data = file
+                filename = "uploaded_file"
+                content_type = "application/octet-stream"
+
+            url = "http://localhost:8000/api/business-card/"
+            files_data = {'image': (filename, upload_data, content_type)}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, files=files_data)
+
+            if response.status_code == 201:
+                self.upload_result = f"{filename} 업로드 및 저장 성공!"
+                await self.get_customers()
+            else:
+                self.upload_result = f"업로드 실패! ({response.status_code})"
+
+        except Exception as e:
+            self.upload_result = f"업로드 중 예외 발생: {str(e)}"
 
     @rx.event
     async def delete_customer(self, customer_id: str):
@@ -69,6 +102,7 @@ class State(rx.State):
     async def reset_upload_state(self):
         self.preview_url = ""
         self.upload_result = ""
+        object.__setattr__(self, "_upload_files", None)
 
 # 2. 메인 페이지
 def main_page():
@@ -112,11 +146,11 @@ def upload_page():
         rx.vstack(
              rx.hstack(
                 rx.link(
-                    rx.button("🏠 메인 페이지", color_scheme="gray", variant="ghost"),
+                    rx.button("🏠 메인 페이지", color_scheme="red", variant="ghost"),
                     href="/"
                 ),
                 rx.link(
-                    rx.button("📊 대시보드", color_scheme="gray", variant="ghost"),
+                    rx.button("📊 대시보드", color_scheme="red", variant="ghost"),
                     href="/dashboard"
                 ),
                 spacing="4",
@@ -147,6 +181,7 @@ def upload_page():
                 padding="56px",
                 border_radius="20px",
                 margin_bottom="24px",
+                on_drop= State.handle_drop,
                 # background를 상태에 따라 동적으로 변경
                 background=rx.cond(
                     State.preview_url != "",
@@ -156,7 +191,7 @@ def upload_page():
             ),
             rx.button(
                 "업로드",
-                on_click=lambda: State.handle_upload(rx.upload_files(upload_id)),
+                on_click=State.handle_upload,
                 color_scheme="teal",
                 size="4",
                 width="100%",
