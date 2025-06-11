@@ -24,7 +24,6 @@ class State(rx.State):
         params = {}
         if self.filter_company != "전체":
             params["company"] = self.filter_company
-        # async with httpx.AsyncClient() as client:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, params=params)
         if response.status_code == 200:
@@ -42,16 +41,14 @@ class State(rx.State):
             return
 
         object.__setattr__(self, "_upload_files", files)
+
         file = files[0]
         if hasattr(file, "read"):
-            # UploadFile 인 경우
             update_file = await file.read()
             mime = getattr(file, "content_type", "application/octet-stream")
         else:
-            # 이미 bytes 인 경우
             update_file = file
-            mime = "application/octet-stream"  # fallback → 필요시 추정 가능
-
+            mime = "application/octet-stream"
         import base64
         encoded = base64.b64encode(update_file).decode("utf-8")
         self.preview_url = f"data:{mime};base64,{encoded}"
@@ -91,11 +88,9 @@ class State(rx.State):
     @rx.event
     async def delete_customer(self, customer_id: str):
         url = f"http://localhost:8000/api/business-card/{customer_id}/"
-        # async with httpx.AsyncClient() as client:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.delete(url)
         if response.status_code == 204:
-            # 삭제 성공 시 목록 갱신
             await self.get_customers()
 
     @rx.event
@@ -144,7 +139,10 @@ def upload_page():
     upload_id = "upload1"
     return rx.center(
         rx.vstack(
-             rx.hstack(
+            # 상단 헤더영역: 제목 + 내비게이션 버튼
+            rx.hstack(
+                rx.heading("📤 명함 업로드", size="6", color="#234e52"),
+                rx.spacer(),
                 rx.link(
                     rx.button("🏠 메인 페이지", color_scheme="red", variant="ghost"),
                     href="/"
@@ -154,41 +152,59 @@ def upload_page():
                     href="/dashboard"
                 ),
                 spacing="4",
-                justify="end",
                 width="100%",
-                padding_bottom="12px"
             ),
-            rx.heading("📤 명함 업로드", size="6", color="#234e52"),
-            rx.upload(
-                # rx.vstack(
-                #     rx.icon("upload", size=32, color="#2c7a7b"),
-                #     rx.text("명함 이미지를 선택하거나 드래그하세요", font_weight="semibold", color="#2c7a7b")
-                # ),
+
+            # 업로드 박스 + 삭제 버튼(좌측 상단)
+            rx.box(
+                rx.upload(
+                    rx.cond(
+                        State.preview_url == "",
+                        rx.vstack(
+                            rx.icon("upload", size=32, color="#2c7a7b"),
+                            rx.text("더블클릭후, 명함이미지를 선택해주세요.", font_weight="semibold", color="#2c7a7b")
+                        )
+                    ),
+                    id=upload_id,
+                    key=State.preview_url,
+                    multiple=False,
+                    accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"]},
+                    max_files=1,
+                    min_height="186px",
+                    min_width="404px",
+                    border="3px dashed #2c7a7b",
+                    padding="56px",
+                    border_radius="20px",
+                    margin_bottom="24px",
+                    on_drop=State.handle_drop,
+                    background=rx.cond(
+                        State.preview_url != "",
+                        "url({}) center/cover no-repeat".format(State.preview_url),
+                        "#ebf8ff"
+                    ),
+                ),
+
+                # 삭제 버튼 (이미지 왼쪽 상단)
                 rx.cond(
-                  State.preview_url == "",
-                  rx.vstack(
-                      rx.icon("upload", size=32, color="#2c7a7b"),
-                      rx.text("더블클릭후, 명함이미지를 선택해주세요.", font_weight="semibold", color="#2c7a7b")
-                  )
-                ),
-                id=upload_id,
-                multiple=False,
-                accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"]},
-                max_files=1,
-                min_height="186px",
-                min_width="404px",
-                border="3px dashed #2c7a7b",
-                padding="56px",
-                border_radius="20px",
-                margin_bottom="24px",
-                on_drop= State.handle_drop,
-                # background를 상태에 따라 동적으로 변경
-                background=rx.cond(
                     State.preview_url != "",
-                    "url({}) center/cover no-repeat".format(State.preview_url),
-                    "#ebf8ff"
+                    rx.button(
+                        "🗑️",
+                        on_click=State.reset_upload_state,
+                        position="absolute",
+                        top="8px",
+                        right="8px",
+                        size="2",
+                        color_scheme="red",
+                        variant="solid",
+                        border_radius="full",
+                        box_shadow="lg",
+                        _hover={"transform": "scale(1.1)", "transition": "all 0.2s"}
+                    ),
                 ),
+                position="relative",
             ),
+
+            # 업로드 실행 버튼
             rx.button(
                 "업로드",
                 on_click=State.handle_upload,
@@ -198,16 +214,8 @@ def upload_page():
                 border_radius="full",
                 box_shadow="lg"
             ),
-            rx.cond(
-                State.preview_url != "",
-                rx.button(
-                    "🗑️ 이미지 삭제",
-                    on_click=State.reset_upload_state,
-                    color_scheme="red",
-                    variant="ghost",
-                    margin_top="8px"
-                )
-            ),
+
+            # 업로드 결과 메시지
             rx.cond(
                 State.upload_result != "",
                 rx.box(
@@ -251,7 +259,7 @@ def dashboard_page():
             border_radius="20px",
             padding="28px",
             margin="12px",
-            background="rgba(255, 255, 255, 0.08)",  # 반투명 배경
+            background="rgba(255, 255, 255, 0.08)",
             box_shadow="0 6px 20px rgba(0,0,0,0.2)",
             _hover={
                 "transform": "scale(1.05)",
@@ -264,7 +272,7 @@ def dashboard_page():
 
     return rx.center(
         rx.vstack(
-             rx.hstack(
+            rx.hstack(
                 rx.link(
                     rx.button("🏠 메인 페이지", color_scheme="gray", variant="ghost"),
                     href="/"
@@ -304,7 +312,6 @@ def dashboard_page():
         min_height="100vh",
         background="linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)"
     )
-
 
 # 5. 앱 생성 및 페이지 등록
 app = rx.App()
